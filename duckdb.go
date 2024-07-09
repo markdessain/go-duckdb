@@ -75,11 +75,28 @@ func NewConnector(dsn string, connInitFn func(execer driver.ExecerContext) error
 
 type Connector struct {
 	db         C.duckdb_database
+	duckdbCon  C.duckdb_connection
 	connInitFn func(execer driver.ExecerContext) error
 }
 
 func (*Connector) Driver() driver.Driver {
 	return Driver{}
+}
+
+type Progress struct {
+	Percentage         float64
+	RowsProcessed      int64
+	TotalRowsToProcess int64
+}
+
+func (c *Connector) Progress() Progress {
+	a := C.duckdb_query_progress(c.duckdbCon)
+
+	return Progress{
+		Percentage:         float64(a.percentage),
+		RowsProcessed:      int64(a.rows_processed),
+		TotalRowsToProcess: int64(a.total_rows_to_process),
+	}
 }
 
 func (c *Connector) Connect(context.Context) (driver.Conn, error) {
@@ -88,6 +105,7 @@ func (c *Connector) Connect(context.Context) (driver.Conn, error) {
 		return nil, getError(errConnect, nil)
 	}
 
+	c.duckdbCon = duckdbCon
 	con := &conn{duckdbCon: duckdbCon}
 
 	if c.connInitFn != nil {
@@ -101,6 +119,7 @@ func (c *Connector) Connect(context.Context) (driver.Conn, error) {
 
 func (c *Connector) Close() error {
 	C.duckdb_close(&c.db)
+	c.duckdbCon = nil
 	c.db = nil
 	return nil
 }

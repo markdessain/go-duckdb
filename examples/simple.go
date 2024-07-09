@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
+	"os"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb"
+	"github.com/markdessain/go-duckdb"
 )
-
-var db *sql.DB
 
 type user struct {
 	name    string
@@ -20,12 +20,18 @@ type user struct {
 }
 
 func main() {
-	var err error
-	db, err = sql.Open("duckdb", "?access_mode=READ_WRITE")
+
+	conn, err := duckdb.NewConnector("", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+
+	db := sql.OpenDB(conn)
+
+	_, err = db.Exec("INSTALL https; LOAD https; PRAGMA enable_progress_bar; PRAGMA disable_print_progress_bar;")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	check(db.Ping())
 
@@ -67,8 +73,9 @@ func main() {
 	ra, _ := res.RowsAffected()
 	log.Printf("Deleted %d rows\n", ra)
 
-	runTransaction()
-	testPreparedStmt()
+	runTransaction(db)
+	testPreparedStmt(db)
+	progressCheck(conn, db)
 }
 
 func check(args ...interface{}) {
@@ -78,7 +85,7 @@ func check(args ...interface{}) {
 	}
 }
 
-func runTransaction() {
+func runTransaction(db *sql.DB) {
 	log.Println("Starting transaction...")
 	tx, err := db.Begin()
 	check(err)
@@ -108,7 +115,7 @@ func runTransaction() {
 	}
 }
 
-func testPreparedStmt() {
+func testPreparedStmt(db *sql.DB) {
 	stmt, err := db.PrepareContext(context.Background(), "INSERT INTO users VALUES(?, ?, ?, ?, ?)")
 	check(err)
 	defer stmt.Close()
@@ -135,4 +142,22 @@ func testPreparedStmt() {
 			u.name, u.age, u.height, u.bday.Format(time.RFC3339), u.awesome,
 		)
 	}
+}
+
+func progressCheck(conn *duckdb.Connector, db *sql.DB) {
+
+	go func() {
+		_, err := db.Query("SELECT * FROM read_parquet('https://github.com/plotly/datasets/raw/master/2015_flights.parquet');")
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		os.Exit(0)
+	}()
+
+	for {
+		fmt.Println(conn.Progress())
+		time.Sleep(time.Millisecond * 1)
+	}
+
 }
